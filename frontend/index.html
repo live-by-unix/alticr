@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ALTICR</title>
+  <link rel="stylesheet" href="/main.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top bar: logo, window controls, settings -->
+    <header id="topbar" data-tauri-drag-region>
+      <div class="logo" data-tauri-drag-region>
+        <span class="logo-mark">&#9656;</span> ALTICR
+      </div>
+      <div class="topbar-spacer" data-tauri-drag-region></div>
+      <button id="btn-new-window" class="icon-btn" title="New window">&#x25A1;+</button>
+      <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
+      <div class="win-controls">
+        <button id="win-min" class="win-btn" title="Minimize">&#8211;</button>
+        <button id="win-max" class="win-btn" title="Maximize">&#9634;</button>
+        <button id="win-close" class="win-btn win-close" title="Close">&#10005;</button>
+      </div>
+    </header>
+
+    <!-- Tab bar -->
+    <nav id="tabbar">
+      <div id="tabs"></div>
+      <button id="btn-new-tab" class="icon-btn" title="New tab">+</button>
+    </nav>
+
+    <!-- Terminal area -->
+    <main id="terms"></main>
+
+    <!-- Search bar -->
+    <div id="searchbar" class="hidden">
+      <input id="search-input" type="text" placeholder="Search terminal..." />
+      <span id="search-result" class="search-result"></span>
+      <button id="search-prev" class="icon-btn" title="Previous">&#9650;</button>
+      <button id="search-next" class="icon-btn" title="Next">&#9660;</button>
+      <button id="search-close" class="icon-btn" title="Close">&#10005;</button>
+    </div>
+
+    <!-- Status bar -->
+    <footer id="statusbar">
+      <span id="st-shell" class="st-item"></span>
+      <span id="st-cwd" class="st-item st-cwd"></span>
+      <span id="st-process" class="st-item"></span>
+      <span class="st-spacer"></span>
+      <span id="st-dims" class="st-item"></span>
+      <span id="st-state" class="st-item"></span>
+    </footer>
+  </div>
+
+  <!-- New tab popover -->
+  <div id="newtab-pop" class="popover hidden">
+    <label>Shell
+      <select id="nt-shell"></select>
+    </label>
+    <label>Custom path <input id="nt-cwd" type="text" placeholder="~/projects" /></label>
+    <label>Arguments <input id="nt-args" type="text" placeholder="-l" /></label>
+    <div class="popover-actions">
+      <button id="nt-cancel" class="btn">Cancel</button>
+      <button id="nt-ok" class="btn btn-primary">Open</button>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settings-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button id="set-close" class="icon-btn">&#10005;</button>
+      </div>
+      <div class="modal-body">
+        <nav class="set-nav">
+          <button data-sec="appearance" class="set-nav-btn active">Appearance</button>
+          <button data-sec="terminal" class="set-nav-btn">Terminal</button>
+          <button data-sec="tabs" class="set-nav-btn">Tabs</button>
+          <button data-sec="advanced" class="set-nav-btn">Advanced</button>
+        </nav>
+        <div class="set-content">
+          <section id="sec-appearance" class="set-page">
+            <label>Theme
+              <select id="set-theme">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <label>Accent color <input id="set-accent" type="color" /></label>
+            <label>Font family <input id="set-font" type="text" placeholder="System monospace" /></label>
+            <label>Font size <input id="set-fontsize" type="number" min="8" max="32" step="0.5" /></label>
+            <label>Line height <input id="set-lineheight" type="number" min="0.8" max="2" step="0.05" /></label>
+            <label>Cursor style
+              <select id="set-cursor">
+                <option value="block">Block</option>
+                <option value="underline">Underline</option>
+                <option value="bar">Bar</option>
+              </select>
+            </label>
+            <label class="check"><input id="set-blink" type="checkbox" /> Cursor blink</label>
+            <label>Padding <input id="set-padding" type="number" min="0" max="32" /></label>
+          </section>
+          <section id="sec-terminal" class="set-page hidden">
+            <label>Default shell <input id="set-shell" type="text" placeholder="auto" /></label>
+            <label>Shell arguments <input id="set-shellargs" type="text" placeholder="e.g. -l" /></label>
+            <label>Startup directory <input id="set-startupdir" type="text" placeholder="~" /></label>
+            <label>Scrollback lines <input id="set-scrollback" type="number" min="0" max="200000" /></label>
+            <label>Environment variables
+              <textarea id="set-env" rows="4" placeholder="KEY=value&#10;FOO=bar"></textarea>
+            </label>
+            <label>Bell <select id="set-bell">
+              <option value="visual">Visual</option>
+              <option value="system">System</option>
+              <option value="off">Off</option>
+            </select></label>
+          </section>
+          <section id="sec-tabs" class="set-page hidden">
+            <label class="check"><input id="set-tabproc" type="checkbox" /> Show process names in tabs</label>
+            <label class="check"><input id="set-tabshell" type="checkbox" /> Show shell names in tabs</label>
+            <label class="check"><input id="set-confirmclose" type="checkbox" /> Confirm before closing running sessions</label>
+          </section>
+          <section id="sec-advanced" class="set-page hidden">
+            <label class="check"><input id="set-osc52" type="checkbox" /> Allow applications to set clipboard (OSC 52)</label>
+            <label class="check"><input id="set-debug" type="checkbox" /> Debug logging</label>
+            <div class="set-actions">
+              <button id="set-reset" class="btn">Reset to defaults</button>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="set-save" class="btn btn-primary">Save</button>
+        <button id="set-cancel" class="btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic context menu -->
+  <div id="ctx-menu" class="ctx-menu hidden"></div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

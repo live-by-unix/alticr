@@ -1,0 +1,22 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.turbo
+*.log
+npm-debug.log*
+
+# Tauri / OS
+.DS_Store
+*.tsbuildinfo
+src-tauri/gen/schemas
+src-tauri/icons/*.icns
+
+# Env / secrets
+.env
+.env.*
+!.env.example
