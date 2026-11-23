@@ -17,6 +17,12 @@ pub struct SessionManager {
     pub settings: SettingsStore,
 }
 
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionManager {
     pub fn new() -> Self {
         let settings = SettingsStore::load().unwrap_or_else(|e| {
@@ -95,6 +101,7 @@ impl SessionManager {
     }
 
     /// Create a session. Returns the new session info.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_session(
         &self,
         window_label: &str,
@@ -284,28 +291,21 @@ fn which_exists(name: &str) -> bool {
 // existed, so output/status/clipboard routing is installed once during
 // setup() via `init_event_bridge`.
 
-static APP_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
 /// Wire session callbacks to Tauri's event emitter. Called once from
 /// setup() after the AppHandle exists.
-///
-/// # Safety
-/// The callbacks capture a raw pointer to the AppHandle, which is valid
-/// for the lifetime of the application.
-pub unsafe fn init_event_bridge(app: AppHandle) {
-    APP_PTR.store(
-        Box::into_raw(Box::new(app)) as usize,
-        std::sync::atomic::Ordering::SeqCst,
-    );
+pub fn init_event_bridge(app: AppHandle) {
+    let _ = APP.set(app);
 
-    fn app() -> &'static AppHandle {
-        unsafe { &*(APP_PTR.load(std::sync::atomic::Ordering::SeqCst) as *const AppHandle) }
+    fn app_handle() -> &'static AppHandle {
+        APP.get().expect("event bridge not initialized")
     }
 
     let output_cb: session::OutputCb = Arc::new(|id, data| {
         use base64::Engine;
         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-        let _ = app().emit(
+        let _ = app_handle().emit(
             "alticr://output",
             session::OutputEvent {
                 session_id: id.to_string(),
@@ -315,11 +315,11 @@ pub unsafe fn init_event_bridge(app: AppHandle) {
     });
 
     let status_cb: session::StatusCb = Arc::new(|s| {
-        emit_status(app(), &s);
+        emit_status(app_handle(), &s);
     });
 
     let clipboard_cb: session::ClipboardCb = Arc::new(|id, text| {
-        let _ = app().emit(
+        let _ = app_handle().emit(
             "alticr://clipboard",
             session::ClipboardEvent {
                 session_id: id,

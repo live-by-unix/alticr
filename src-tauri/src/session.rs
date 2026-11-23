@@ -303,12 +303,11 @@ fn reader_loop(session: Arc<Session>, reader: &mut dyn Read) {
 
 fn handle_osc(session: &Arc<Session>, seq: &crate::osc::OscSequence) {
     match seq.ps {
-        0 | 1 | 2 => {
+        0..=2
             // Window / icon / tab title.
-            if !seq.pt.is_empty() {
+            if !seq.pt.is_empty() => {
                 *session.title.lock().unwrap() = seq.pt.clone();
             }
-        }
         7 => {
             // cwd reporting: file://host/path
             if let Some(p) = process_info::parse_osc7_cwd(&seq.pt) {

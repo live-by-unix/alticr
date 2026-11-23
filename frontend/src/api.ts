@@ -114,6 +114,9 @@ export function onStatus(cb: (e: StatusEvent) => void): Promise<UnlistenFn> {
 export function onClipboard(cb: (e: ClipboardEvent) => void): Promise<UnlistenFn> {
   return listen<ClipboardEvent>("alticr://clipboard", (e) => cb(e.payload));
 }
+export function onMenuAction(cb: (action: string) => void): Promise<UnlistenFn> {
+  return listen<string>("alticr://menu-action", (e) => cb(e.payload));
+}
 
 // ---- base64 helpers ------------------------------------------------------
 

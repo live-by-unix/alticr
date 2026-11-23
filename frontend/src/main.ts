@@ -10,6 +10,7 @@ import {
   api,
   b64ToBytes,
   onClipboard,
+  onMenuAction,
   onOutput,
   onStatus,
   strToB64,
@@ -204,6 +205,47 @@ async function createSession(opts?: {
   return tab;
 }
 
+// In-app confirm dialog — window.confirm() is unreliable inside the
+// Tauri webview and can silently fail, leaving windows unable to close.
+function confirmDialog(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText =
+      "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;" +
+      "align-items:center;justify-content:center;z-index:400";
+    const box = document.createElement("div");
+    box.style.cssText =
+      "background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;" +
+      "padding:18px 20px;max-width:380px;color:var(--text);font-size:13px;" +
+      "box-shadow:0 12px 40px rgba(0,0,0,.5)";
+    const msg = document.createElement("div");
+    msg.textContent = message;
+    msg.style.marginBottom = "16px";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;justify-content:flex-end;gap:8px";
+    const cancel = document.createElement("button");
+    cancel.className = "btn";
+    cancel.textContent = "Cancel";
+    const ok = document.createElement("button");
+    ok.className = "btn btn-primary";
+    ok.textContent = "OK";
+    const done = (v: boolean) => {
+      backdrop.remove();
+      resolve(v);
+    };
+    cancel.onclick = () => done(false);
+    ok.onclick = () => done(true);
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) done(false);
+    });
+    row.append(cancel, ok);
+    box.append(msg, row);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+    ok.focus();
+  });
+}
+
 async function closeTab(idx: number) {
   const tab = tabs[idx];
   if (!tab) return;
@@ -212,9 +254,10 @@ async function closeTab(idx: number) {
     (tab.state === "running" || tab.state === "starting")
   ) {
     const name = tabLabel(tab);
-    if (!window.confirm(`Close terminal "${name}"? The running process will be terminated.`)) {
-      return;
-    }
+    const ok = await confirmDialog(
+      `Close terminal "${name}"? The running process will be terminated.`,
+    );
+    if (!ok) return;
   }
   tabs.splice(idx, 1);
   tab.host.remove();
@@ -226,6 +269,9 @@ async function closeTab(idx: number) {
   else activeIdx = -1;
   renderTabs();
   renderStatus();
+
+  // Closing the last tab closes the window (standard terminal behavior).
+  if (tabs.length === 0) void win.close().catch(() => {});
 }
 
 function activateTab(idx: number) {
@@ -432,6 +478,15 @@ async function wireEvents() {
     }
   });
 
+  // Native menu actions (accelerators handled by the OS menu bar).
+  await onMenuAction((action) => {
+    if (action === "open_settings") {
+      openSettings();
+      return;
+    }
+    void runShortcut(action);
+  });
+
   await onClipboard((e) => {
     // OSC 52: payload looks like "c;<data>" where <data> may be
     // base64 (prefixed with '?') or plain text.
@@ -627,8 +682,11 @@ async function showNewTabPop(anchor: HTMLElement) {
 
   const r = anchor.getBoundingClientRect();
   pop.classList.remove("hidden");
-  pop.style.left = `${Math.max(8, r.left)}px`;
-  pop.style.top = `${r.bottom + 6}px`;
+  // Clamp horizontally so the popover never spills off the right edge.
+  const popWidth = pop.offsetWidth || 260;
+  const left = Math.min(r.left, innerWidth - popWidth - 8);
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top = `${Math.min(r.bottom + 6, innerHeight - pop.offsetHeight - 8)}px`;
   ($("nt-cwd") as HTMLInputElement).focus();
 }
 
@@ -664,8 +722,11 @@ async function newWindow() {
       minHeight: 320,
       decorations: false,
       backgroundColor: "#101418",
+      // Center relative to the parent window's monitor.
+      center: true,
     });
     await w.once("tauri://created", () => {});
+    await w.setFocus().catch(() => {});
   } catch (e) {
     showToast(`Failed to open window: ${e}`);
   }
@@ -785,6 +846,9 @@ function accelMatches(accel: string, e: KeyboardEvent): boolean {
 
 function inEditable(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement;
+  // xterm.js's helper textarea must not count as "editable" — otherwise
+  // every shortcut is swallowed while the terminal has focus.
+  if (t.classList?.contains("xterm-helper-textarea")) return false;
   return (
     t.tagName === "INPUT" ||
     t.tagName === "TEXTAREA" ||
@@ -864,8 +928,30 @@ function persistSetting(patch: Record<string, unknown>) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (inEditable(e)) {
+  if (e.defaultPrevented) return;
+  const editable = inEditable(e);
+  // Inside text fields, only modifier shortcuts (Cmd/Ctrl combos) are
+  // handled globally; plain typing is left alone.
+  if (editable && !(e.metaKey || e.ctrlKey)) {
     if (e.key === "Escape") (e.target as HTMLElement).blur();
+    return;
+  }
+  if (editable && e.key === "Escape") {
+    (e.target as HTMLElement).blur();
+    return;
+  }
+
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs. On macOS Cmd+Tab is reserved
+  // by the OS, so Ctrl is the reliable modifier everywhere.
+  if (e.ctrlKey && !e.metaKey && e.key === "Tab") {
+    e.preventDefault();
+    if (tabs.length) {
+      activateTab(
+        e.shiftKey
+          ? (activeIdx - 1 + tabs.length) % tabs.length
+          : (activeIdx + 1) % tabs.length,
+      );
+    }
     return;
   }
 
@@ -942,14 +1028,22 @@ async function boot() {
   wireEvents();
 
   // Window close confirmation for running sessions.
+  // NOTE: use close() (graceful) rather than destroy() — force-destroying
+  // races WebKit's obscured-content-inset dispatch and crashes on macOS.
+  let closeConfirmed = false;
   await win.onCloseRequested(async (e) => {
+    if (closeConfirmed) return;
     if (
       settings.confirm_close_running &&
       tabs.some((t) => t.state === "running" || t.state === "starting")
     ) {
       e.preventDefault();
-      if (window.confirm("Some terminals still have running processes. Close anyway?")) {
-        await win.destroy();
+      const ok = await confirmDialog(
+        "Some terminals still have running processes. Close anyway?",
+      );
+      if (ok) {
+        closeConfirmed = true;
+        await win.close().catch(() => {});
       }
     }
   });
@@ -1001,7 +1095,8 @@ async function boot() {
   $("set-cancel").addEventListener("click", closeSettings);
   $("set-save").addEventListener("click", () => void saveSettings());
   $("set-reset").addEventListener("click", () => {
-    if (window.confirm("Reset all settings to defaults?")) {
+    void (async () => {
+      if (!(await confirmDialog("Reset all settings to defaults?"))) return;
       api
         .setSettings({})
         .then(applySettings)
@@ -1009,7 +1104,7 @@ async function boot() {
       // Re-open to show defaults
       closeSettings();
       openSettings();
-    }
+    })();
   });
   document.querySelectorAll(".set-nav-btn").forEach((b) => {
     b.addEventListener("click", () => {
@@ -1021,8 +1116,9 @@ async function boot() {
     });
   });
 
-  // Global shortcuts.
+  // Global shortcuts — capture on window, fallback on document.
   window.addEventListener("keydown", onKeyDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
 
   // Adopt sessions that may already exist for this window (e.g. restore).
   try {
@@ -1036,6 +1132,20 @@ async function boot() {
 
   // First tab.
   await createSession();
+}
+
+// Dev-only: reload the webview when the dev server rebuilds dist/.
+declare const __ALTICR_DEV__: boolean;
+if (typeof __ALTICR_DEV__ !== "undefined" && __ALTICR_DEV__) {
+  let stamp = "";
+  setInterval(async () => {
+    try {
+      const r = await fetch("/.build-stamp", { cache: "no-store" });
+      const t = await r.text();
+      if (stamp && t !== stamp) location.reload();
+      stamp = t;
+    } catch { /* server restarting */ }
+  }, 1500);
 }
 
 boot().catch((e) => {

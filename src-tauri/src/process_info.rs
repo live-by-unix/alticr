@@ -150,10 +150,7 @@ pub fn parse_osc7_cwd(uri: &str) -> Option<PathBuf> {
         // file:///path — authority empty
         0
     } else {
-        match rest.find('/') {
-            Some(i) => i,
-            None => return None,
-        }
+        rest.find('/')?
     };
     let path = &rest[path_start..];
     if path.is_empty() {
