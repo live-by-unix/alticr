@@ -191,15 +191,17 @@ fn resize_updates_dimensions() {
 fn osc_title_and_cwd_are_captured() {
     collect_output();
     let s = spawn(80, 24);
-    // Emit an OSC 0 title via printf.
-    s.write(b"printf '\\033]0;ALTICR-TITLE\\007'\n").unwrap();
+    // Emit OSC 0 (title) and OSC 7 (cwd), then block in `sleep` so no
+    // prompt redraw overwrites them — deterministic on any shell.
+    s.write(
+        b"printf '\\033]0;ALTICR-TITLE\\007\\033]7;file://localhost/osc-test-cwd\\007'; sleep 30\n",
+    )
+    .unwrap();
 
-    // zsh precmd emits its own OSC 7 with the resolved cwd; that exercises
-    // the same code path as a manually emitted one.
     let ok = wait_for(
         || {
             let snap = s.snapshot();
-            snap.title.contains("ALTICR-TITLE") && snap.cwd.contains("folders")
+            snap.title.contains("ALTICR-TITLE") && snap.cwd.contains("osc-test-cwd")
         },
         Duration::from_secs(10),
     );
